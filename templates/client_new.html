@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}New Client — Halfway Charge{% endblock %}
+{% block content %}
+<a href="/" class="btn btn-ghost" style="margin-bottom:32px;">← Back</a>
+<h1 class="page-title">New Client</h1>
+<p class="page-sub">Add a solar site to track</p>
+<div class="card" style="max-width:520px;">
+  <form method="POST">
+    <div class="form-group">
+      <label>Site / Client Name</label>
+      <input type="text" name="name" required placeholder="e.g. Beekman Estate">
+    </div>
+    <div class="form-group">
+      <label>Email (optional)</label>
+      <input type="email" name="email" placeholder="client@example.com">
+    </div>
+    <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">Create Client</button>
+  </form>
+</div>
+{% endblock %}

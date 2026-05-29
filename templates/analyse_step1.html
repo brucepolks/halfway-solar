@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}New Report — {{ client.name }}{% endblock %}
+{% block content %}
+<a href="/client/{{ client.id }}" class="btn btn-ghost" style="margin-bottom:32px;">← Back</a>
+<h1 class="page-title">New Report</h1>
+<p class="page-sub">{{ client.name }} — Upload Eskom bill (optional)</p>
+<div class="card" style="max-width:560px;">
+  <form method="POST" enctype="multipart/form-data">
+    <div class="form-group">
+      <label>Eskom Bill PDF (optional)</label>
+      <input type="file" name="bill_pdf" accept=".pdf" style="padding:10px;">
+    </div>
+    <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">Next →</button>
+  </form>
+</div>
+{% endblock %}

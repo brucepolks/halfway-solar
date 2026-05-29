@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ client.name }} — Solar Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0A0907; font-family: 'Hanken Grotesk', sans-serif; }
+
+  /* ACTION BAR */
+  .action-bar {
+    position: sticky; top: 0; z-index: 100;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 12px 24px;
+    background: rgba(10,9,7,0.9); backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+  .action-bar .spacer { flex: 1; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 16px; border-radius: 8px; font-size: 0.82rem; font-weight: 500;
+    cursor: pointer; text-decoration: none; border: none; font-family: inherit;
+    transition: all 0.15s; white-space: nowrap;
+  }
+  .btn-ghost { background: rgba(255,255,255,0.06); color: #E8E4DF; border: 1px solid rgba(255,255,255,0.1); }
+  .btn-ghost:hover { background: rgba(255,255,255,0.1); }
+  .btn-primary { background: #C00000; color: #fff; }
+  .btn-primary:hover { background: #a50000; }
+  .btn-danger { background: rgba(192,0,0,0.15); color: #ff6b6b; border: 1px solid rgba(192,0,0,0.3); }
+  .btn-danger:hover { background: rgba(192,0,0,0.25); }
+
+  /* NEW BANNER */
+  .new-banner {
+    background: linear-gradient(135deg, rgba(34,197,94,0.15), rgba(34,197,94,0.05));
+    border: 1px solid rgba(34,197,94,0.3);
+    color: #22C55E; text-align: center; padding: 12px;
+    font-size: 0.875rem;
+  }
+
+  /* REPORT FRAME */
+  .report-frame { width: 100%; min-height: calc(100vh - 56px); border: none; display: block; }
+
+  /* SEND MODAL */
+  .modal-bg { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:200; align-items:center; justify-content:center; }
+  .modal-bg.open { display:flex; }
+  .modal {
+    background: #1A1714; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px;
+    padding: 32px; width: 100%; max-width: 420px; margin: 24px;
+  }
+  .modal h3 { color: #fff; font-size: 1.1rem; margin-bottom: 16px; }
+  .modal input { width: 100%; padding: 11px 14px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: #E8E4DF; font-family: inherit; font-size: 0.9rem; outline: none; margin-bottom: 14px; }
+  .modal input:focus { border-color: #C00000; }
+  .modal-actions { display: flex; gap: 10px; }
+  #send-msg { margin-top: 12px; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+
+<div class="action-bar">
+  <a href="/client/{{ client.id }}" class="btn btn-ghost">← Back</a>
+  <span style="color:rgba(232,228,223,0.4);font-size:0.85rem;">{{ client.name }}</span>
+  <div class="spacer"></div>
+  {% if analysis.report_xlsx %}
+  <a href="/report/{{ analysis.token }}/excel" class="btn btn-ghost">⬇ Excel</a>
+  {% endif %}
+  <button onclick="copyLink()" class="btn btn-ghost">🔗 Copy Link</button>
+  <button onclick="document.getElementById('send-modal').classList.add('open')" class="btn btn-primary">✉ Send Report</button>
+  <form method="POST" action="/report/{{ analysis.token }}/delete" onsubmit="return confirm('Delete this report permanently?')">
+    <button type="submit" class="btn btn-danger">🗑 Delete</button>
+  </form>
+</div>
+
+{% if is_new %}
+<div class="new-banner">✓ Report generated successfully! Share the link or send it directly.</div>
+{% endif %}
+
+<!-- Render the report HTML inline -->
+<div id="report-content">{{ report_html|safe }}</div>
+
+<!-- Send Modal -->
+<div id="send-modal" class="modal-bg">
+  <div class="modal">
+    <h3>Send Report</h3>
+    <input type="email" id="send-email" placeholder="recipient@halfway.co.za">
+    <div class="modal-actions">
+      <button onclick="sendReport()" class="btn btn-primary" style="flex:1;justify-content:center;">Send</button>
+      <button onclick="document.getElementById('send-modal').classList.remove('open')" class="btn btn-ghost">Cancel</button>
+    </div>
+    <p id="send-msg"></p>
+  </div>
+</div>
+
+<script>
+function copyLink() {
+  navigator.clipboard.writeText(window.location.origin + '/report/{{ analysis.token }}');
+  alert('Link copied to clipboard!');
+}
+async function sendReport() {
+  const email = document.getElementById('send-email').value;
+  const msg = document.getElementById('send-msg');
+  msg.textContent = 'Sending...'; msg.style.color = '#E8E4DF';
+  const r = await fetch('/report/{{ analysis.token }}/send', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({email})
+  });
+  const d = await r.json();
+  if (d.ok) {
+    msg.style.color = '#22C55E';
+    msg.textContent = '✓ ' + (d.message || 'Report sent!');
+  } else if (d.manual) {
+    msg.style.color = '#E8A020';
+    msg.innerHTML = 'SMTP not configured. Share this link:<br><small style="word-break:break-all">' + d.url + '</small>';
+  } else {
+    msg.style.color = '#ff6b6b';
+    msg.textContent = '✗ ' + (d.error || 'Error sending.');
+  }
+}
+</script>
+</body>
+</html>
