@@ -20,6 +20,18 @@ with app.app_context():
     init_db()
 
 def get_setting(key, default=None):
+    # Environment variables take priority (for Railway deployment)
+    env_map = {
+        'dash_username': 'DASH_USERNAME',
+        'dash_password': 'DASH_PASSWORD',
+        'smtp_host':     'SMTP_HOST',
+        'smtp_port':     'SMTP_PORT',
+        'smtp_user':     'SMTP_USER',
+        'smtp_password': 'SMTP_PASSWORD',
+    }
+    env_val = os.environ.get(env_map.get(key, ''))
+    if env_val:
+        return env_val
     db = get_db()
     row = db.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
     db.close()
@@ -31,7 +43,30 @@ def set_setting(key, value):
     db.commit()
     db.close()
 
-# ── INDEX ──────────────────────────────────────────────────────────────────────
+
+def _dates_from_period(period_str):
+    """Convert 'APRIL 2026' -> ('2026-04-01', '2026-04-30', 'April 2026')"""
+    import calendar
+    months = {m.upper(): i for i, m in enumerate(calendar.month_name) if m}
+    if not period_str:
+        return '', '', ''
+    parts = period_str.upper().split()
+    try:
+        if len(parts) >= 2:
+            month_name = parts[0]
+            year = int(parts[-1])
+            month_num = months.get(month_name)
+            if month_num:
+                last_day = calendar.monthrange(year, month_num)[1]
+                date_from = f"{year}-{month_num:02d}-01"
+                date_to   = f"{year}-{month_num:02d}-{last_day:02d}"
+                label     = f"{month_name.capitalize()} {year}"
+                return date_from, date_to, label
+    except:
+        pass
+    return '', '', period_str
+
+# Index
 @app.route('/')
 def index():
     db = get_db()
@@ -39,7 +74,7 @@ def index():
     db.close()
     return render_template('index.html', clients=clients)
 
-# ── CLIENTS ────────────────────────────────────────────────────────────────────
+# Clients
 @app.route('/client/new', methods=['GET','POST'])
 def client_new():
     if request.method == 'POST':
@@ -62,7 +97,7 @@ def client_detail(client_id):
         abort(404)
     return render_template('client_detail.html', client=client, analyses=analyses)
 
-# ── ANALYSE ────────────────────────────────────────────────────────────────────
+# Analyse
 @app.route('/client/<int:client_id>/analyse', methods=['GET','POST'])
 def analyse_step1(client_id):
     db = get_db()
@@ -71,19 +106,35 @@ def analyse_step1(client_id):
     if not client:
         abort(404)
     if request.method == 'POST':
-        bill_file = request.files.get('bill_pdf')
-        bill_path = None
-        bill_data = {}
-        if bill_file and bill_file.filename:
-            safe = bill_file.filename.replace(' ','_')
-            bill_path = os.path.join(UPLOADS_DIR, safe)
-            bill_file.save(bill_path)
-            try:
-                bill_data = parse_eskom_bill(bill_path)
-            except Exception as e:
-                bill_data = {'error': str(e)}
+        bill_files = request.files.getlist('bill_pdf')
+        bill_paths = []
+        bills = []
+
+        for bill_file in bill_files:
+            if bill_file and bill_file.filename:
+                safe = bill_file.filename.replace(' ', '_')
+                bill_path = os.path.join(UPLOADS_DIR, safe)
+                bill_file.save(bill_path)
+                bill_paths.append(bill_path)
+                try:
+                    bd = parse_eskom_bill(bill_path)
+                    bd['filename'] = bill_file.filename
+                    bills.append(bd)
+                except Exception as e:
+                    print(f'Bill parse error {bill_file.filename}: {e}')
+
+        period_str = bills[0].get('period', '') if bills else ''
+        date_from, date_to, period_label = _dates_from_period(period_str)
+        bill_path_str = ','.join(bill_paths)
+
+        bill_data = {
+            'period': period_str,
+            'total_kwh': sum(b.get('total_kwh') or 0 for b in bills),
+            'count': len(bills)
+        }
         return render_template('analyse_step2.html', client=client,
-                               bill_data=bill_data, bill_path=bill_path)
+                               bill_data=bill_data, bill_path=bill_path_str,
+                               date_from=date_from, date_to=date_to, period_label=period_label)
     return render_template('analyse_step1.html', client=client)
 
 @app.route('/client/<int:client_id>/analyse/generate', methods=['POST'])
@@ -94,7 +145,6 @@ def analyse_generate(client_id):
     if not client:
         abort(404)
 
-    # Get form data
     period      = request.form.get('period','')
     date_from   = request.form.get('date_from','')
     date_to     = request.form.get('date_to','')
@@ -102,11 +152,9 @@ def analyse_generate(client_id):
     tariff_rate = float(request.form.get('tariff_rate', 2.50))
     bill_path   = request.form.get('bill_path','')
 
-    # Dash IOT credentials from settings
     dash_user = get_setting('dash_username','')
     dash_pass = get_setting('dash_password','')
 
-    # Scrape data
     raw_rows = []
     if dash_user and dash_pass and date_from and date_to:
         try:
@@ -115,7 +163,6 @@ def analyse_generate(client_id):
         except Exception as e:
             print(f'Scraper error: {e}')
 
-    # Build analysis_data structure
     totals = {'generation': 0, 'export': 0, 'import': 0, 'consumption': 0}
     formatted_rows = []
     for row in raw_rows:
@@ -141,26 +188,27 @@ def analyse_generate(client_id):
         'savings': {'amount': savings_amount, 'percent': savings_pct}
     }
 
-    bill_data = {}
-    if bill_path and os.path.exists(bill_path):
-        try:
-            bill_data = parse_eskom_bill(bill_path)
-        except:
-            pass
+    bills = []
+    for bp in (bill_path.split(',') if bill_path else []):
+        bp = bp.strip()
+        if bp and os.path.exists(bp):
+            try:
+                bd = parse_eskom_bill(bp)
+                bd['filename'] = os.path.basename(bp)
+                bills.append(bd)
+            except:
+                pass
 
-    # Generate token and filenames
     token = uuid.uuid4().hex
     safe_name = client['name'].replace(' ','_').replace('/','').strip('_')
     safe_period = period.replace(' ','_')
 
-    # Build HTML report
-    html_content = build_html_report(dict(client), analysis_data, bill_data)
+    html_content = build_html_report(dict(client), analysis_data, bills)
     html_filename = f'{safe_name}_{safe_period}_{token[:8]}.html'
     html_path = os.path.join(REPORTS_DIR, html_filename)
     with open(html_path, 'w') as f:
         f.write(html_content)
 
-    # Build Excel report
     xlsx_filename = f'{safe_name}_{safe_period}_{token[:8]}.xlsx'
     xlsx_path = os.path.join(REPORTS_DIR, xlsx_filename)
     try:
@@ -169,7 +217,6 @@ def analyse_generate(client_id):
         print(f'Excel error: {e}')
         xlsx_filename = None
 
-    # Save to DB
     db = get_db()
     db.execute('''INSERT INTO analyses (client_id, token, filename, report_html, report_xlsx)
                   VALUES (?,?,?,?,?)''',
@@ -187,7 +234,7 @@ def _parse_num(val):
     except:
         return 0
 
-# ── REPORTS ────────────────────────────────────────────────────────────────────
+# Reports
 @app.route('/report/<token>')
 def report_view(token):
     db = get_db()
@@ -257,10 +304,8 @@ def report_send(token):
     if not analysis:
         return jsonify({'ok': False, 'error': 'Report not found'}), 404
 
-    # Build report URL
     report_url = request.host_url.rstrip('/') + url_for('report_view', token=token)
 
-    # Get SMTP settings
     smtp_host = get_setting('smtp_host', '')
     smtp_port = int(get_setting('smtp_port', '587') or 587)
     smtp_user = get_setting('smtp_user', '')
@@ -271,7 +316,7 @@ def report_send(token):
     if smtp_host and smtp_user and smtp_pass:
         try:
             msg = MIMEMultipart('alternative')
-            msg['Subject'] = f'Halfway Charge — Solar Report: {client_name}'
+            msg['Subject'] = f'Halfway Charge - Solar Report: {client_name}'
             msg['From'] = smtp_user
             msg['To'] = recipient
             body = f"""<html><body style="font-family:sans-serif;background:#0A0907;color:#E8E4DF;padding:32px;">
@@ -293,7 +338,7 @@ def report_send(token):
         return jsonify({'ok': False, 'error': 'SMTP not configured', 'url': report_url,
                         'manual': True})
 
-# ── SETTINGS ───────────────────────────────────────────────────────────────────
+# Settings
 @app.route('/settings', methods=['GET','POST'])
 def settings():
     if request.method == 'POST':
