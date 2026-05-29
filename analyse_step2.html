@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Review Bill — Halfway Charge{% endblock %}
+{% block content %}
+<div style="margin-bottom:20px;">
+  <a href="/analyse/new" style="font-size:13px;color:var(--muted);text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-bottom:12px;">← Back</a>
+  <div class="page-eyebrow">Step 2 of 2 · {{ client.name }}</div>
+  <h1 class="page-title" style="margin-bottom:6px;">Review Bill Data</h1>
+  <p class="page-sub">Check the extracted values, then we'll pull Dash IOT and generate the report.</p>
+</div>
+
+<!-- Progress dots -->
+<div style="display:flex;gap:8px;margin-bottom:28px;">
+  <div style="height:4px;flex:1;border-radius:99px;background:var(--red);"></div>
+  <div style="height:4px;flex:1;border-radius:99px;background:var(--red);"></div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+
+  <div class="card">
+    <h2 style="font-family:var(--font-d);font-weight:700;font-size:16px;margin-bottom:16px;">Bill Data</h2>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5;">Auto-extracted from the PDF. Correct anything that looks wrong.</p>
+    <div class="form-group"><label>Billing Period From</label>
+      <input id="period_from" value="{{ bill.period_from or '' }}" type="date"></div>
+    <div class="form-group"><label>Billing Period To</label>
+      <input id="period_to" value="{{ bill.period_to or '' }}" type="date"></div>
+    <div class="form-group"><label>Total Grid kWh Billed</label>
+      <input id="bill_kwh" value="{{ '%.2f'|format(bill.bill_kwh_total) }}" type="number" step="0.01"></div>
+    <div class="form-group"><label>Total Charges (excl VAT)</label>
+      <input id="bill_excl_vat" value="{{ '%.2f'|format(bill.bill_excl_vat) }}" type="number" step="0.01"></div>
+    <div class="form-group"><label>Total Amount Due (incl VAT)</label>
+      <input id="bill_incl_vat" value="{{ '%.2f'|format(bill.bill_incl_vat) }}" type="number" step="0.01"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-family:var(--font-d);font-weight:700;font-size:16px;margin-bottom:6px;">Savings Rate Breakdown</h2>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5;">Per-kWh charges included in savings calculation. Uncheck any that don't apply.</p>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:32px;">✓</th>
+          <th>Charge</th>
+          <th style="text-align:right;">Rate (R/kWh)</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for comp in bill.rate_components %}
+        {% if comp.include_in_savings %}
+        <tr>
+          <td><input type="checkbox" class="rate-check" data-name="{{ comp.name }}"
+            data-rate="{{ '%.4f'|format(comp.rate) }}" data-applies="{{ comp.applies_to }}" checked
+            style="width:16px;height:16px;accent-color:var(--red);cursor:pointer;"></td>
+          <td>
+            <div style="font-size:13px;font-weight:600;">{{ comp.name }}</div>
+            <div style="font-size:11px;color:var(--muted);">{{ comp.applies_to }}</div>
+          </td>
+          <td style="text-align:right;font-family:var(--font-d);font-weight:700;font-size:14px;color:var(--amber);">R {{ '%.4f'|format(comp.rate) }}</td>
+        </tr>
+        {% endif %}
+      {% endfor %}
+      </tbody>
+    </table>
+    <div style="margin-top:16px;padding:14px 16px;background:rgba(192,0,0,.1);border:1px solid rgba(192,0,0,.3);border-radius:12px;">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:4px;">Combined Savings Rate</div>
+      <div id="combined-rate" style="font-family:var(--font-d);font-weight:800;font-size:24px;color:var(--red);">
+        R {{ '%.4f'|format(bill.combined_rate) }} / kWh
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<button onclick="runAnalysis()" class="btn btn-red" style="width:100%;max-width:580px;justify-content:center;font-size:15px;padding:15px;">
+  Fetch Dashboard Data &amp; Generate Report →
+</button>
+
+<!-- Progress overlay -->
+<div id="overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;align-items:center;justify-content:center;backdrop-filter:blur(6px);">
+  <div style="background:#16130F;border:1px solid var(--line2);border-radius:20px;padding:44px;text-align:center;min-width:360px;">
+    <div id="spin-icon" style="font-size:42px;margin-bottom:16px;display:inline-block;animation:spin 1.4s linear infinite;">☀️</div>
+    <h3 style="font-family:var(--font-d);font-weight:800;font-size:20px;margin-bottom:8px;">Running Analysis</h3>
+    <p id="progress-msg" style="color:var(--muted);font-size:14px;margin-bottom:20px;">Connecting to Dash IOT…</p>
+    <div style="height:4px;background:var(--line2);border-radius:99px;overflow:hidden;">
+      <div id="progress-bar" style="height:100%;background:linear-gradient(90deg,var(--red),var(--amber));width:10%;border-radius:99px;transition:width .6s ease;"></div>
+    </div>
+  </div>
+</div>
+<style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+
+<script>
+function updateCombined(){
+  const total=Array.from(document.querySelectorAll('.rate-check:checked')).reduce((s,c)=>s+parseFloat(c.dataset.rate),0);
+  document.getElementById('combined-rate').textContent='R '+total.toFixed(4)+' / kWh';
+}
+document.querySelectorAll('.rate-check').forEach(c=>c.addEventListener('change',updateCombined));
+
+async function runAnalysis(){
+  document.getElementById('overlay').style.display='flex';
+  const rates=Array.from(document.querySelectorAll('.rate-check:checked')).map(c=>({name:c.dataset.name,rate:parseFloat(c.dataset.rate),applies_to:c.dataset.applies}));
+  const combined=rates.reduce((s,r)=>s+r.rate,0);
+  const payload={
+    client_id:{{ client_id }},
+    period_from:document.getElementById('period_from').value,
+    period_to:document.getElementById('period_to').value,
+    bill_kwh:document.getElementById('bill_kwh').value,
+    bill_excl_vat:document.getElementById('bill_excl_vat').value,
+    bill_incl_vat:document.getElementById('bill_incl_vat').value,
+    combined_rate:combined.toFixed(4),
+    rate_components:JSON.stringify(rates),
+  };
+  const {job_id}=await fetch('/analyse/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json());
+  const msgs=["Logging into Dash IOT…","Pulling dashboard data…","Calculating savings…","Generating report…"];
+  const widths=["20%","45%","70%","90%"];
+  const poll=setInterval(async()=>{
+    const s=await fetch('/analyse/status/'+job_id).then(r=>r.json());
+    const idx=msgs.indexOf(s.message);
+    if(idx>=0){document.getElementById('progress-msg').textContent=s.message;document.getElementById('progress-bar').style.width=widths[idx];}
+    if(s.status==='done'){clearInterval(poll);document.getElementById('progress-bar').style.width='100%';document.getElementById('progress-msg').textContent='Report ready!';setTimeout(()=>window.location.href='/report/'+s.token+'?new=1',600);}
+    else if(s.status==='error'){clearInterval(poll);document.getElementById('overlay').style.display='none';alert('Error: '+s.message);}
+  },1500);
+}
+</script>
+{% endblock %}

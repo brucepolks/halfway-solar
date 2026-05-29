@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Clients — Halfway Charge{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:28px;flex-wrap:wrap;">
+  <div>
+    <div class="page-eyebrow">Portfolio</div>
+    <h1 class="page-title">Clients</h1>
+    <p class="page-sub">{{ clients|length }} site{{ 's' if clients|length != 1 else '' }} tracked</p>
+  </div>
+  <a href="/client/new" class="btn btn-red">+ Add Client</a>
+</div>
+
+{% if clients %}
+<div class="card" style="padding:0;overflow:hidden;">
+  <table>
+    <thead>
+      <tr>
+        <th>Client</th>
+        <th>Site</th>
+        <th>Analyses</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for c in clients %}
+    <tr>
+      <td>
+        <div style="font-weight:700;font-family:var(--font-d);font-size:15px;">{{ c.name }}</div>
+        {% if c.address %}<div style="color:var(--muted);font-size:12px;margin-top:2px;">{{ c.address }}</div>{% endif %}
+      </td>
+      <td style="color:var(--muted);font-size:13px;">{{ c.site_name }}</td>
+      <td>
+        {% if c.analysis_count %}
+          <span class="badge badge-green">{{ c.analysis_count }} report{{ 's' if c.analysis_count != 1 else '' }}</span>
+        {% else %}
+          <span class="badge badge-amber">None yet</span>
+        {% endif %}
+      </td>
+      <td style="text-align:right;">
+        <a href="/client/{{ c.id }}" class="btn btn-grey btn-sm">View →</a>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card empty">
+  <div class="empty-icon">☀️</div>
+  <p>No clients yet.<br><a href="/client/new">Add your first client →</a></p>
+</div>
+{% endif %}
+{% endblock %}
