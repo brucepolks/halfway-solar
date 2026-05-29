@@ -10,14 +10,14 @@ def _ss(page, name):
 def get_site_data(username, password, site_name, date_from, date_to):
     """
     Scrape Dash IOT for a given site and date range.
-    Returns list of dicts with keys: date, export_kwh, import_kwh, generation_kwh, consumption_kwh
+    Returns list of rows (lists of cell values) from the data table.
     """
     results = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         try:
-            # --- LOGIN ---
+            # Login
             page.goto('https://monitoring.dashiot.co.za/login', timeout=30000)
             page.wait_for_load_state('networkidle', timeout=15000)
             _ss(page, '1_login_page')
@@ -29,8 +29,7 @@ def get_site_data(username, password, site_name, date_from, date_to):
             page.wait_for_load_state('networkidle', timeout=15000)
             _ss(page, '3_after_login')
 
-            # --- NAVIGATE TO ENERGY / FILTER PAGE ---
-            # Try to find a link or menu item for energy/reporting
+            # Navigate to energy/reporting section
             for nav_text in ['Energy', 'Reports', 'Analytics', 'Overview']:
                 try:
                     link = page.locator(f'a:has-text("{nav_text}"), button:has-text("{nav_text}")').first
@@ -43,10 +42,9 @@ def get_site_data(username, password, site_name, date_from, date_to):
 
             _ss(page, '4_after_nav')
 
-            # --- SELECT SITE ---
+            # Select site
             page.wait_for_timeout(3000)
             try:
-                # Find site/location dropdown
                 selects = page.locator('select').all()
                 for sel in selects:
                     options = sel.locator('option').all()
@@ -61,7 +59,7 @@ def get_site_data(username, password, site_name, date_from, date_to):
                 print(f'Site selection warning: {e}')
             _ss(page, '5_after_site_select')
 
-            # --- SET DATES using React-compatible setter ---
+            # Set dates using React-compatible setter
             def set_date_input(selector, value):
                 page.wait_for_selector(selector, timeout=5000)
                 page.evaluate(f"""
@@ -95,7 +93,7 @@ def get_site_data(username, password, site_name, date_from, date_to):
 
             _ss(page, '6_dates_set')
 
-            # --- SET PAGE SIZE TO 100 ---
+            # Set page size to maximum
             try:
                 page.evaluate("""
                     (function() {
@@ -113,7 +111,7 @@ def get_site_data(username, password, site_name, date_from, date_to):
             except:
                 pass
 
-            # --- CLICK FILTER ---
+            # Click filter/search button
             try:
                 page.evaluate("""
                     (function() {
@@ -134,7 +132,7 @@ def get_site_data(username, password, site_name, date_from, date_to):
 
             _ss(page, '7_after_filter')
 
-            # --- EXTRACT TABLE DATA ---
+            # Extract table data
             page.wait_for_timeout(2000)
             rows = page.locator('table tbody tr').all()
             for row in rows:
