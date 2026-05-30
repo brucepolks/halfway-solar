@@ -1,4 +1,4 @@
-import os, uuid, json, smtplib
+import os, uuid, json, smtplib, traceback
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file, abort
@@ -150,13 +150,16 @@ def analyse_generate(client_id):
     dash_user = get_setting('dash_username','')
     dash_pass = get_setting('dash_password','')
     raw_rows = []
+    scraper_error = None
     if dash_user and dash_pass and date_from and date_to:
         try:
             from modules.dash_scraper import get_site_data
             raw_rows = get_site_data(dash_user, dash_pass, site_name, date_from, date_to)
         except Exception as e:
-            print(f'Scraper error: {e}')
-    # Dash IOT columns: Date | Consumption | Production | Grid Import | Grid Export
+            scraper_error = traceback.format_exc()
+            print(f'Scraper error: {scraper_error}')
+    else:
+        print(f'Scraper skipped: user={bool(dash_user)} pass={bool(dash_pass)} from={date_from} to={date_to}')
     totals = {'generation': 0, 'export': 0, 'import': 0, 'consumption': 0}
     formatted_rows = []
     for row in raw_rows:
@@ -242,7 +245,7 @@ def report_excel(token):
     if not analysis or not analysis['report_xlsx']:
         abort(404)
     path = os.path.join(REPORTS_DIR, analysis['report_xlsx'])
-    if not os.path.exists(path):
+    if not os.path.exists(path)
         abort(404)
     return send_file(path, as_attachment=True)
 
@@ -290,7 +293,7 @@ def report_send(token):
             msg['Subject'] = f'Halfway Charge - Solar Report: {client_name}'
             msg['From'] = smtp_user
             msg['To'] = recipient
-            body = f'<html><body><h2>Halfway Charge Solar Report</h2><p>Report for <strong>{client_name}</strong> is ready.</p><p><a href="{report_url}">View Report</a></p></body></html>'
+            body = f'<html><body><h2>Solar Report</h2><p>Report for <strong>{client_name}</strong> is ready.</p><p><a href="{report_url}">View Report</a></p></body></html>'
             msg.attach(MIMEText(body, 'html'))
             with smtplib.SMTP(smtp_host, smtp_port) as s:
                 s.starttls()
@@ -312,6 +315,30 @@ def settings():
         return redirect(url_for('settings'))
     current = {k: get_setting(k,'') for k in ['dash_username','smtp_host','smtp_port','smtp_user']}
     return render_template('settings.html', settings=current)
+
+@app.route('/debug')
+def debug():
+    result = {
+        'dash_user': get_setting('dash_username',''),
+        'dash_pass_set': bool(get_setting('dash_password','')),
+        'playwright_ok': False,
+        'playwright_error': None,
+        'chromium_ok': False,
+        'chromium_error': None,
+    }
+    try:
+        from playwright.sync_api import sync_playwright
+        result['playwright_ok'] = True
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                browser.close()
+                result['chromium_ok'] = True
+        except Exception as e:
+            result['chromium_error'] = traceback.format_exc()
+    except Exception as e:
+        result['playwright_error'] = traceback.format_exc()
+    return jsonify(result)
 
 if __name__ == '__main__':
     app.run(debug=True, port=PORT)
