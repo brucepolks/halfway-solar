@@ -124,14 +124,8 @@ def analyse_step1(client_id):
         period_str = bills[0].get('period', '') if bills else ''
         date_from, date_to, period_label = _dates_from_period(period_str)
         bill_path_str = ','.join(bill_paths)
-        bill_data = {
-            'period': period_str,
-            'total_kwh': sum(b.get('total_kwh') or 0 for b in bills),
-            'count': len(bills)
-        }
-        return render_template('analyse_step2.html', client=client,
-                               bill_data=bill_data, bill_path=bill_path_str,
-                               date_from=date_from, date_to=date_to, period_label=period_label)
+        bill_data = {'period': period_str, 'total_kwh': sum(b.get('total_kwh') or 0 for b in bills), 'count': len(bills)}
+        return render_template('analyse_step2.html', client=client, bill_data=bill_data, bill_path=bill_path_str, date_from=date_from, date_to=date_to, period_label=period_label)
     return render_template('analyse_step1.html', client=client)
 
 @app.route('/client/<int:client_id>/analyse/generate', methods=['POST'])
@@ -141,204 +135,178 @@ def analyse_generate(client_id):
     db.close()
     if not client:
         abort(404)
-    period      = request.form.get('period','')
-    date_from   = request.form.get('date_from','')
-    date_to     = request.form.get('date_to','')
-    site_name   = request.form.get('site_name', client['name'])
-    tariff_rate = float(request.form.get('tariff_rate', 2.50))
-    bill_path   = request.form.get('bill_path','')
-    dash_user = get_setting('dash_username','')
-    dash_pass = get_setting('dash_password','')
-    raw_rows = []
-    scraper_error = None
+    period=request.form.get('period','')
+    date_from=request.form.get('date_from','')
+    date_to=request.form.get('date_to','')
+    site_name=request.form.get('site_name', client['name'])
+    tariff_rate=float(request.form.get('tariff_rate', 2.50))
+    bill_path=request.form.get('bill_path','')
+    dash_user=get_setting('dash_username','')
+    dash_pass=get_setting('dash_password','')
+    raw_rows=[]
     if dash_user and dash_pass and date_from and date_to:
         try:
             from modules.dash_scraper import get_site_data
-            raw_rows = get_site_data(dash_user, dash_pass, site_name, date_from, date_to)
+            raw_rows=get_site_data(dash_user, dash_pass, site_name, date_from, date_to)
         except Exception as e:
-            scraper_error = traceback.format_exc()
-            print(f'Scraper error: {scraper_error}')
+            print(f'Scraper error: {traceback.format_exc()}')
     else:
         print(f'Scraper skipped: user={bool(dash_user)} pass={bool(dash_pass)} from={date_from} to={date_to}')
-    totals = {'generation': 0, 'export': 0, 'import': 0, 'consumption': 0}
-    formatted_rows = []
+    totals={'generation':0,'export':0,'import':0,'consumption':0}
+    formatted_rows=[]
     for row in raw_rows:
         formatted_rows.append(row)
         try:
-            if len(row) >= 4:
-                totals['consumption'] += _parse_num(row[1])
-                totals['generation']  += _parse_num(row[2])
-                totals['import']      += _parse_num(row[3])
-                totals['export']      += _parse_num(row[4]) if len(row) > 4 else 0
+            if len(row)>=4:
+                totals['consumption']+=_parse_num(row[1])
+                totals['generation']+=_parse_num(row[2])
+                totals['import']+=_parse_num(row[3])
+                totals['export']+=_parse_num(row[4]) if len(row)>4 else 0
         except:
             pass
-    self_consumed = totals['generation'] - totals['export']
-    savings_amount = self_consumed * tariff_rate
-    baseline = totals['consumption'] * tariff_rate
-    savings_pct = (savings_amount / baseline * 100) if baseline else 0
-    analysis_data = {'period': period, 'rows': formatted_rows, 'totals': totals,
-                     'savings': {'amount': savings_amount, 'percent': savings_pct}}
-    bills = []
+    self_consumed=totals['generation']-totals['export']
+    savings_amount=self_consumed*tariff_rate
+    baseline=totals['consumption']*tariff_rate
+    savings_pct=(savings_amount/baseline*100) if baseline else 0
+    analysis_data={'period':period,'rows':formatted_rows,'totals':totals,'savings':{'amount':savings_amount,'percent':savings_pct}}
+    bills=[]
     for bp in (bill_path.split(',') if bill_path else []):
-        bp = bp.strip()
+        bp=bp.strip()
         if bp and os.path.exists(bp):
             try:
-                bd = parse_eskom_bill(bp)
-                bd['filename'] = os.path.basename(bp)
+                bd=parse_eskom_bill(bp)
+                bd['filename']=os.path.basename(bp)
                 bills.append(bd)
             except:
                 pass
-    token = uuid.uuid4().hex
-    safe_name = client['name'].replace(' ','_').replace('/','').strip('_')
-    safe_period = period.replace(' ','_')
-    html_content = build_html_report(dict(client), analysis_data, bills)
-    html_filename = f'{safe_name}_{safe_period}_{token[:8]}.html'
-    html_path = os.path.join(REPORTS_DIR, html_filename)
-    with open(html_path, 'w') as f:
+    token=uuid.uuid4().hex
+    safe_name=client['name'].replace(' ','_').replace('/','').strip('_')
+    safe_period=period.replace(' ','_')
+    html_content=build_html_report(dict(client), analysis_data, bills)
+    html_filename=f'{safe_name}_{safe_period}_{token[:8]}.html'
+    with open(os.path.join(REPORTS_DIR, html_filename), 'w') as f:
         f.write(html_content)
-    xlsx_filename = f'{safe_name}_{safe_period}_{token[:8]}.xlsx'
-    xlsx_path = os.path.join(REPORTS_DIR, xlsx_filename)
+    xlsx_filename=f'{safe_name}_{safe_period}_{token[:8]}.xlsx'
     try:
-        build_excel_report(dict(client), analysis_data, xlsx_path)
+        build_excel_report(dict(client), analysis_data, os.path.join(REPORTS_DIR, xlsx_filename))
     except Exception as e:
         print(f'Excel error: {e}')
-        xlsx_filename = None
-    db = get_db()
-    db.execute('INSERT INTO analyses (client_id, token, filename, report_html, report_xlsx) VALUES (?,?,?,?,?)',
-               (client_id, token, f'{safe_name}_{safe_period}', html_filename, xlsx_filename))
+        xlsx_filename=None
+    db=get_db()
+    db.execute('INSERT INTO analyses (client_id, token, filename, report_html, report_xlsx) VALUES (?,?,?,?,?)',(client_id,token,f'{safe_name}_{safe_period}',html_filename,xlsx_filename))
     db.commit()
     db.close()
-    return redirect(url_for('report_view', token=token) + '?new=1')
+    return redirect(url_for('report_view', token=token)+'?new=1')
 
 def _parse_num(val):
-    if val is None:
-        return 0
-    try:
-        return float(str(val).replace(',','').strip())
-    except:
-        return 0
+    if val is None: return 0
+    try: return float(str(val).replace(',','').strip())
+    except: return 0
 
 @app.route('/report/<token>')
 def report_view(token):
-    db = get_db()
-    analysis = db.execute('SELECT * FROM analyses WHERE token=?', (token,)).fetchone()
+    db=get_db()
+    analysis=db.execute('SELECT * FROM analyses WHERE token=?',(token,)).fetchone()
     db.close()
-    if not analysis:
-        abort(404)
-    db = get_db()
-    client = db.execute('SELECT * FROM clients WHERE id=?', (analysis['client_id'],)).fetchone()
+    if not analysis: abort(404)
+    db=get_db()
+    client=db.execute('SELECT * FROM clients WHERE id=?',(analysis['client_id'],)).fetchone()
     db.close()
-    html_path = os.path.join(REPORTS_DIR, analysis['report_html'])
-    report_html = ''
+    html_path=os.path.join(REPORTS_DIR, analysis['report_html'])
+    report_html=''
     if os.path.exists(html_path):
-        with open(html_path) as f:
-            report_html = f.read()
-    is_new = request.args.get('new') == '1'
-    return render_template('report_view.html', analysis=analysis, client=client,
-                           report_html=report_html, is_new=is_new)
+        with open(html_path) as f: report_html=f.read()
+    is_new=request.args.get('new')=='1'
+    return render_template('report_view.html', analysis=analysis, client=client, report_html=report_html, is_new=is_new)
 
 @app.route('/report/<token>/excel')
 def report_excel(token):
-    db = get_db()
-    analysis = db.execute('SELECT * FROM analyses WHERE token=?', (token,)).fetchone()
+    db=get_db()
+    analysis=db.execute('SELECT * FROM analyses WHERE token=?',(token,)).fetchone()
     db.close()
-    if not analysis or not analysis['report_xlsx']:
-        abort(404)
-    path = os.path.join(REPORTS_DIR, analysis['report_xlsx'])
-    if not os.path.exists(path)
-        abort(404)
+    if not analysis or not analysis['report_xlsx']: abort(404)
+    path=os.path.join(REPORTS_DIR, analysis['report_xlsx'])
+    if not os.path.exists(path): abort(404)
     return send_file(path, as_attachment=True)
 
 @app.route('/report/<token>/delete', methods=['POST'])
 def report_delete(token):
-    db = get_db()
-    analysis = db.execute('SELECT * FROM analyses WHERE token=?', (token,)).fetchone()
+    db=get_db()
+    analysis=db.execute('SELECT * FROM analyses WHERE token=?',(token,)).fetchone()
     if not analysis:
         db.close()
         abort(404)
-    client_id = analysis['client_id']
+    client_id=analysis['client_id']
     for f in [analysis['report_html'], analysis['report_xlsx']]:
         if f:
-            p = os.path.join(REPORTS_DIR, f)
-            if os.path.exists(p):
-                os.remove(p)
-    db.execute('DELETE FROM analyses WHERE token=?', (token,))
+            p=os.path.join(REPORTS_DIR, f)
+            if os.path.exists(p): os.remove(p)
+    db.execute('DELETE FROM analyses WHERE token=?',(token,))
     db.commit()
     db.close()
     return redirect(url_for('client_detail', client_id=client_id))
 
 @app.route('/report/<token>/send', methods=['POST'])
 def report_send(token):
-    data = request.get_json() or {}
-    recipient = data.get('email','').strip()
-    if not recipient:
-        return jsonify({'ok': False, 'error': 'No email address provided'}), 400
-    db = get_db()
-    analysis = db.execute('SELECT * FROM analyses WHERE token=?', (token,)).fetchone()
-    client = None
-    if analysis:
-        client = db.execute('SELECT * FROM clients WHERE id=?', (analysis['client_id'],)).fetchone()
+    data=request.get_json() or {}
+    recipient=data.get('email','').strip()
+    if not recipient: return jsonify({'ok':False,'error':'No email'}),400
+    db=get_db()
+    analysis=db.execute('SELECT * FROM analyses WHERE token=?',(token,)).fetchone()
+    client=None
+    if analysis: client=db.execute('SELECT * FROM clients WHERE id=?',(analysis['client_id'],)).fetchone()
     db.close()
-    if not analysis:
-        return jsonify({'ok': False, 'error': 'Report not found'}), 404
-    report_url = request.host_url.rstrip('/') + url_for('report_view', token=token)
-    smtp_host = get_setting('smtp_host', '')
-    smtp_port = int(get_setting('smtp_port', '587') or 587)
-    smtp_user = get_setting('smtp_user', '')
-    smtp_pass = get_setting('smtp_password', '')
-    client_name = client['name'] if client else 'Client'
+    if not analysis: return jsonify({'ok':False,'error':'Not found'}),404
+    report_url=request.host_url.rstrip('/')+url_for('report_view',token=token)
+    smtp_host=get_setting('smtp_host','')
+    smtp_port=int(get_setting('smtp_port','587') or 587)
+    smtp_user=get_setting('smtp_user','')
+    smtp_pass=get_setting('smtp_password','')
+    client_name=client['name'] if client else 'Client'
     if smtp_host and smtp_user and smtp_pass:
         try:
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = f'Halfway Charge - Solar Report: {client_name}'
-            msg['From'] = smtp_user
-            msg['To'] = recipient
-            body = f'<html><body><h2>Solar Report</h2><p>Report for <strong>{client_name}</strong> is ready.</p><p><a href="{report_url}">View Report</a></p></body></html>'
-            msg.attach(MIMEText(body, 'html'))
-            with smtplib.SMTP(smtp_host, smtp_port) as s:
+            msg=MIMEMultipart('alternative')
+            msg['Subject']=f'Solar Report: {client_name}'
+            msg['From']=smtp_user
+            msg['To']=recipient
+            body=f'<html><body><p>{client_name} report ready.</p><p><a href="{report_url}">View</a></p></body></html>'
+            msg.attach(MIMEText(body,'html'))
+            with smtplib.SMTP(smtp_host,smtp_port) as s:
                 s.starttls()
-                s.login(smtp_user, smtp_pass)
-                s.sendmail(smtp_user, recipient, msg.as_string())
-            return jsonify({'ok': True, 'message': f'Report sent to {recipient}'})
+                s.login(smtp_user,smtp_pass)
+                s.sendmail(smtp_user,recipient,msg.as_string())
+            return jsonify({'ok':True,'message':f'Sent to {recipient}'})
         except Exception as e:
-            return jsonify({'ok': False, 'error': str(e), 'url': report_url})
+            return jsonify({'ok':False,'error':str(e),'url':report_url})
     else:
-        return jsonify({'ok': False, 'error': 'SMTP not configured', 'url': report_url, 'manual': True})
+        return jsonify({'ok':False,'error':'SMTP not configured','url':report_url,'manual':True})
 
 @app.route('/settings', methods=['GET','POST'])
 def settings():
-    if request.method == 'POST':
+    if request.method=='POST':
         for key in ['dash_username','dash_password','smtp_host','smtp_port','smtp_user','smtp_password']:
-            val = request.form.get(key,'').strip()
-            if val:
-                set_setting(key, val)
+            val=request.form.get(key,'').strip()
+            if val: set_setting(key,val)
         return redirect(url_for('settings'))
-    current = {k: get_setting(k,'') for k in ['dash_username','smtp_host','smtp_port','smtp_user']}
+    current={k:get_setting(k,'') for k in ['dash_username','smtp_host','smtp_port','smtp_user']}
     return render_template('settings.html', settings=current)
 
 @app.route('/debug')
 def debug():
-    result = {
-        'dash_user': get_setting('dash_username',''),
-        'dash_pass_set': bool(get_setting('dash_password','')),
-        'playwright_ok': False,
-        'playwright_error': None,
-        'chromium_ok': False,
-        'chromium_error': None,
-    }
+    result={'dash_user':get_setting('dash_username',''),'dash_pass_set':bool(get_setting('dash_password','')),'playwright_ok':False,'playwright_error':None,'chromium_ok':False,'chromium_error':None}
     try:
         from playwright.sync_api import sync_playwright
-        result['playwright_ok'] = True
+        result['playwright_ok']=True
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
+                browser=p.chromium.launch(headless=True)
                 browser.close()
-                result['chromium_ok'] = True
+                result['chromium_ok']=True
         except Exception as e:
-            result['chromium_error'] = traceback.format_exc()
+            result['chromium_error']=traceback.format_exc()
     except Exception as e:
-        result['playwright_error'] = traceback.format_exc()
+        result['playwright_error']=traceback.format_exc()
     return jsonify(result)
 
-if __name__ == '__main__':
+if __name__=='__main__':
     app.run(debug=True, port=PORT)
