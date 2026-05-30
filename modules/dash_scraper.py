@@ -8,7 +8,6 @@ def _ss(page, name):
     page.screenshot(path=os.path.join(DEBUG_DIR, f'{name}.png'))
 
 def _fuzzy_match(site_name, option_text):
-    """Return True if any significant word of site_name appears in option_text."""
     site_words = [w.strip() for w in site_name.lower().replace('/', ' ').split() if len(w) > 2]
     opt = option_text.lower()
     return any(w in opt for w in site_words)
@@ -16,7 +15,7 @@ def _fuzzy_match(site_name, option_text):
 def get_site_data(username, password, site_name, date_from, date_to):
     """
     Scrape Dash IOT for a given site and date range.
-    Returns list of rows (lists of cell values) from the data table.
+    Dash IOT table columns: Date | Consumption [kWh] | Production [kWh] | Grid Import [kWh] | Grid Export [kWh]
     """
     results = []
     with sync_playwright() as p:
@@ -35,13 +34,14 @@ def get_site_data(username, password, site_name, date_from, date_to):
             page.wait_for_load_state('networkidle', timeout=15000)
             _ss(page, '3_after_login')
 
-            # Navigate to energy/reporting section
-            for nav_text in ['Energy', 'Reports', 'Analytics', 'Overview']:
+            # Navigate to Electricity Data section
+            for nav_text in ['Electricity', 'Energy', 'Reports', 'Analytics', 'Overview']:
                 try:
                     link = page.locator(f'a:has-text("{nav_text}"), button:has-text("{nav_text}")').first
                     if link.is_visible(timeout=2000):
                         link.click()
                         page.wait_for_load_state('networkidle', timeout=10000)
+                        print(f'Navigated via: {nav_text}')
                         break
                 except:
                     pass
@@ -97,6 +97,7 @@ def get_site_data(username, password, site_name, date_from, date_to):
                         'input[id*="from" i]', 'input[type="date"]:first-of-type']:
                 try:
                     set_date_input(sel, date_from)
+                    print(f'Date from set: {date_from}')
                     break
                 except:
                     pass
@@ -105,13 +106,14 @@ def get_site_data(username, password, site_name, date_from, date_to):
                         'input[id*="to" i]', 'input[type="date"]:last-of-type']:
                 try:
                     set_date_input(sel, date_to)
+                    print(f'Date to set: {date_to}')
                     break
                 except:
                     pass
 
             _ss(page, '6_dates_set')
 
-            # Set page size to max
+            # Set page size to 100 if available
             try:
                 page.evaluate("""
                     (function() {
