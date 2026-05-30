@@ -7,6 +7,12 @@ def _ss(page, name):
     os.makedirs(DEBUG_DIR, exist_ok=True)
     page.screenshot(path=os.path.join(DEBUG_DIR, f'{name}.png'))
 
+def _fuzzy_match(site_name, option_text):
+    """Return True if any significant word of site_name appears in option_text."""
+    site_words = [w.strip() for w in site_name.lower().replace('/', ' ').split() if len(w) > 2]
+    opt = option_text.lower()
+    return any(w in opt for w in site_words)
+
 def get_site_data(username, password, site_name, date_from, date_to):
     """
     Scrape Dash IOT for a given site and date range.
@@ -41,22 +47,36 @@ def get_site_data(username, password, site_name, date_from, date_to):
                     pass
 
             _ss(page, '4_after_nav')
-
-            # Select site
             page.wait_for_timeout(3000)
+
+            # Select site - exact match first, then fuzzy
             try:
                 selects = page.locator('select').all()
                 for sel in selects:
                     options = sel.locator('option').all()
+                    matched = False
                     for opt in options:
                         opt_text = opt.inner_text()
-                        if site_name.lower() in opt_text.lower():
-                            opt_val = opt.get_attribute('value')
-                            sel.select_option(value=opt_val)
+                        if site_name.lower() in opt_text.lower() or opt_text.lower() in site_name.lower():
+                            sel.select_option(value=opt.get_attribute('value'))
                             page.wait_for_timeout(1000)
+                            matched = True
+                            print(f'Site matched (exact): {opt_text}')
                             break
+                    if not matched:
+                        for opt in options:
+                            opt_text = opt.inner_text()
+                            if _fuzzy_match(site_name, opt_text):
+                                sel.select_option(value=opt.get_attribute('value'))
+                                page.wait_for_timeout(1000)
+                                matched = True
+                                print(f'Site matched (fuzzy): {opt_text}')
+                                break
+                    if matched:
+                        break
             except Exception as e:
                 print(f'Site selection warning: {e}')
+
             _ss(page, '5_after_site_select')
 
             # Set dates using React-compatible setter
@@ -73,18 +93,16 @@ def get_site_data(username, password, site_name, date_from, date_to):
                     }})();
                 """)
 
-            date_selectors_from = ['input[name="dateFrom"]', 'input[placeholder*="from" i]',
-                                    'input[id*="from" i]', 'input[type="date"]:first-of-type']
-            date_selectors_to   = ['input[name="dateTo"]', 'input[placeholder*="to" i]',
-                                    'input[id*="to" i]', 'input[type="date"]:last-of-type']
-
-            for sel in date_selectors_from:
+            for sel in ['input[name="dateFrom"]', 'input[placeholder*="from" i]',
+                        'input[id*="from" i]', 'input[type="date"]:first-of-type']:
                 try:
                     set_date_input(sel, date_from)
                     break
                 except:
                     pass
-            for sel in date_selectors_to:
+
+            for sel in ['input[name="dateTo"]', 'input[placeholder*="to" i]',
+                        'input[id*="to" i]', 'input[type="date"]:last-of-type']:
                 try:
                     set_date_input(sel, date_to)
                     break
@@ -93,15 +111,15 @@ def get_site_data(username, password, site_name, date_from, date_to):
 
             _ss(page, '6_dates_set')
 
-            # Set page size to maximum
+            # Set page size to max
             try:
                 page.evaluate("""
                     (function() {
                         var selects = document.querySelectorAll('select');
                         for (var s of selects) {
                             var opts = Array.from(s.options).map(o => o.value);
-                            if (opts.includes('100') || opts.includes('10')) {
-                                s.value = opts.includes('100') ? '100' : opts[opts.length-1];
+                            if (opts.includes('100')) {
+                                s.value = '100';
                                 s.dispatchEvent(new Event('change', {bubbles:true}));
                                 break;
                             }
@@ -111,14 +129,14 @@ def get_site_data(username, password, site_name, date_from, date_to):
             except:
                 pass
 
-            # Click filter/search button
+            # Click filter/apply button
             try:
                 page.evaluate("""
                     (function() {
-                        var all = Array.from(document.querySelectorAll('button, input[type=submit], input[type=button], a'));
+                        var all = Array.from(document.querySelectorAll('button, input[type=submit], input[type=button]'));
                         for (var el of all) {
                             var txt = (el.innerText || el.value || '').toLowerCase();
-                            if (txt.includes('filter') || txt.includes('search') || txt.includes('apply')) {
+                            if (txt.includes('filter') || txt.includes('search') || txt.includes('apply') || txt.includes('go')) {
                                 el.scrollIntoView();
                                 el.click();
                                 break;
@@ -126,7 +144,7 @@ def get_site_data(username, password, site_name, date_from, date_to):
                         }
                     })();
                 """)
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(4000)
             except Exception as e:
                 print(f'Filter click warning: {e}')
 
@@ -140,6 +158,7 @@ def get_site_data(username, password, site_name, date_from, date_to):
                 if cells and len(cells) >= 2:
                     results.append(cells)
 
+            print(f'Scraped {len(results)} rows for site "{site_name}"')
             _ss(page, '8_data_extracted')
 
         except Exception as e:
