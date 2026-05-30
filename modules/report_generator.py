@@ -14,66 +14,79 @@ def _parse_num(val):
 
 
 def _group_by_month(rows):
+    """Group data rows by month. Expects row[0] to be a date string."""
     months = defaultdict(list)
     for row in rows:
         if not row:
             continue
         date_str = str(row[0]).strip()
         month_key = 'Unknown'
-        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y'):
+        # Handle YYYY-MM format from Dash IOT
+        import re
+        m = re.match(r'^(\d{4})-(\d{2})$', date_str)
+        if m:
+            from datetime import date
             try:
-                dt = datetime.strptime(date_str, fmt)
+                dt = date(int(m.group(1)), int(m.group(2)), 1)
                 month_key = dt.strftime('%B %Y')
-                break
             except:
-                pass
+                month_key = date_str
+        else:
+            for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y'):
+                try:
+                    dt = datetime.strptime(date_str, fmt)
+                    month_key = dt.strftime('%B %Y')
+                    break
+                except:
+                    pass
         months[month_key].append(row)
     return months
 
 
 def _month_totals(rows):
+    # Dash IOT columns: Date | Consumption | Production | Grid Import | Grid Export
     gen = exp = imp = cons = 0
     for row in rows:
-        if len(row) > 1: gen  += _parse_num(row[1])
-        if len(row) > 2: exp  += _parse_num(row[2])
+        if len(row) > 1: cons += _parse_num(row[1])
+        if len(row) > 2: gen  += _parse_num(row[2])
         if len(row) > 3: imp  += _parse_num(row[3])
-        if len(row) > 4: cons += _parse_num(row[4])
+        if len(row) > 4: exp  += _parse_num(row[4])
     return gen, exp, imp, cons
 
 
 def build_excel_report(client, analysis_data, output_path):
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Solar Report"
+    ws.title = 'Solar Report'
 
-    red_fill   = PatternFill("solid", fgColor="C00000")
-    dark_fill  = PatternFill("solid", fgColor="1A1714")
-    grey_fill  = PatternFill("solid", fgColor="2A2724")
-    amber_fill = PatternFill("solid", fgColor="3A2800")
-    white_font = Font(color="FFFFFF", bold=True, name="Calibri")
-    normal_font = Font(color="FFFFFF", name="Calibri")
+    red_fill   = PatternFill('solid', fgColor='C00000')
+    dark_fill  = PatternFill('solid', fgColor='1A1714')
+    grey_fill  = PatternFill('solid', fgColor='2A2724')
+    amber_fill = PatternFill('solid', fgColor='3A2800')
+    white_font = Font(color='FFFFFF', bold=True, name='Calibri')
+    normal_font = Font(color='FFFFFF', name='Calibri')
 
-    ws.merge_cells("A1:F1")
-    ws["A1"] = f"Halfway Charge - Solar Report: {client['name']}"
-    ws["A1"].font = Font(color="FFFFFF", bold=True, size=16, name="Calibri")
-    ws["A1"].fill = dark_fill
-    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.merge_cells('A1:F1')
+    ws['A1'] = f"Halfway Charge - Solar Report: {client['name']}"
+    ws['A1'].font = Font(color='FFFFFF', bold=True, size=16, name='Calibri')
+    ws['A1'].fill = dark_fill
+    ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
     ws.row_dimensions[1].height = 40
 
-    headers = ["Date", "Generation (kWh)", "Export (kWh)", "Import (kWh)", "Consumption (kWh)", "Notes"]
+    headers = ['Date', 'Consumption (kWh)', 'Production (kWh)', 'Grid Import (kWh)', 'Grid Export (kWh)', 'Notes']
     for col, h in enumerate(headers, 1):
         cell = ws.cell(row=2, column=col, value=h)
         cell.font = white_font
         cell.fill = red_fill
-        cell.alignment = Alignment(horizontal="center")
+        cell.alignment = Alignment(horizontal='center')
 
     rows = analysis_data.get('rows', [])
     months = _group_by_month(rows)
     current_row = 3
 
     for month_name, month_rows in months.items():
-        ws.merge_cells(f"A{current_row}:F{current_row}")
-        ws.cell(row=current_row, column=1, value=month_name).font = Font(color="E8A020", bold=True, name="Calibri")
+        ws.merge_cells(f'A{current_row}:F{current_row}')
+        ws.cell(row=current_row, column=1, value=month_name).font = Font(color='E8A020', bold=True, name='Calibri')
         ws.cell(row=current_row, column=1).fill = amber_fill
         current_row += 1
 
@@ -83,26 +96,26 @@ def build_excel_report(client, analysis_data, output_path):
                 cell = ws.cell(row=current_row, column=c_idx, value=val)
                 cell.font = normal_font
                 cell.fill = fill
-                cell.alignment = Alignment(horizontal="center")
+                cell.alignment = Alignment(horizontal='center')
             current_row += 1
 
         gen, exp, imp, cons = _month_totals(month_rows)
-        subtotal_data = [f"{month_name} Total", gen, exp, imp, cons, ""]
+        subtotal_data = [f'{month_name} Total', cons, gen, imp, exp, '']
         for c_idx, val in enumerate(subtotal_data, 1):
             cell = ws.cell(row=current_row, column=c_idx, value=val)
             cell.font = white_font
-            cell.fill = PatternFill("solid", fgColor="1E3A1E")
-            cell.alignment = Alignment(horizontal="center")
+            cell.fill = PatternFill('solid', fgColor='1E3A1E')
+            cell.alignment = Alignment(horizontal='center')
         current_row += 2
 
     totals = analysis_data.get('totals', {})
-    grand = ["GRAND TOTAL", totals.get('generation',0), totals.get('export',0),
-             totals.get('import',0), totals.get('consumption',0), ""]
+    grand = ['GRAND TOTAL', totals.get('consumption',0), totals.get('generation',0),
+             totals.get('import',0), totals.get('export',0), '']
     for c_idx, val in enumerate(grand, 1):
         cell = ws.cell(row=current_row, column=c_idx, value=val)
         cell.font = white_font
         cell.fill = red_fill
-        cell.alignment = Alignment(horizontal="center")
+        cell.alignment = Alignment(horizontal='center')
 
     for col in range(1, 7):
         ws.column_dimensions[get_column_letter(col)].width = 22
@@ -142,14 +155,14 @@ def build_html_report(client, analysis_data, bills=None):
         <div class="month-block">
           <div class="month-title">{month_name}</div>
           <div class="kpi-mini-grid">
-            <div class="kpi-mini green"><span>{gen:,.0f}</span><small>Generated kWh</small></div>
+            <div class="kpi-mini green"><span>{gen:,.0f}</span><small>Production kWh</small></div>
             <div class="kpi-mini amber"><span>{self_c:,.0f}</span><small>Self Consumed</small></div>
             <div class="kpi-mini red"><span>{imp:,.0f}</span><small>Grid Import</small></div>
-            <div class="kpi-mini"><span>{cons:,.0f}</span><small>Total Consumption</small></div>
+            <div class="kpi-mini"><span>{cons:,.0f}</span><small>Consumption kWh</small></div>
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Date</th><th>Generation (kWh)</th><th>Export (kWh)</th><th>Import (kWh)</th><th>Consumption (kWh)</th></tr></thead>
+              <thead><tr><th>Date</th><th>Consumption (kWh)</th><th>Production (kWh)</th><th>Grid Import (kWh)</th><th>Grid Export (kWh)</th></tr></thead>
               <tbody>{row_html}</tbody>
             </table>
           </div>
@@ -208,11 +221,7 @@ def build_html_report(client, analysis_data, bills=None):
     --font-d: 'Bricolage Grotesque', sans-serif; --font-b: 'Hanken Grotesk', sans-serif;
   }}
   body {{ background: var(--bg); color: #E8E4DF; font-family: var(--font-b); min-height: 100vh; position: relative; overflow-x: hidden; }}
-  body::before {{
-    content: ''; position: fixed; inset: 0;
-    background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(192,0,0,0.18) 0%, transparent 70%);
-    pointer-events: none; z-index: 0;
-  }}
+  body::before {{ content: ''; position: fixed; inset: 0; background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(192,0,0,0.18) 0%, transparent 70%); pointer-events: none; z-index: 0; }}
   .wrap {{ position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 48px 24px; }}
   .report-header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 48px; }}
   .brand {{ display: flex; align-items: center; gap: 12px; }}
@@ -228,9 +237,7 @@ def build_html_report(client, analysis_data, bills=None):
   .kpi .kpi-label {{ font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(232,228,223,0.4); margin-bottom: 8px; }}
   .kpi .kpi-value {{ font-family: var(--font-d); font-size: 2rem; font-weight: 700; color: #fff; }}
   .kpi .kpi-unit {{ font-size: 0.8rem; color: rgba(232,228,223,0.4); margin-top: 4px; }}
-  .kpi.red .kpi-value {{ color: var(--red); }}
-  .kpi.green .kpi-value {{ color: var(--green); }}
-  .kpi.amber .kpi-value {{ color: var(--amber); }}
+  .kpi.red .kpi-value {{ color: var(--red); }} .kpi.green .kpi-value {{ color: var(--green); }} .kpi.amber .kpi-value {{ color: var(--amber); }}
   .section-title {{ font-family: var(--font-d); font-size: 1.3rem; font-weight: 700; color: #fff; margin: 48px 0 24px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }}
   .month-block {{ margin-bottom: 40px; }}
   .month-title {{ font-family: var(--font-d); font-size: 1.05rem; font-weight: 600; color: var(--amber); margin-bottom: 16px; }}
@@ -238,9 +245,7 @@ def build_html_report(client, analysis_data, bills=None):
   .kpi-mini {{ background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; text-align: center; }}
   .kpi-mini span {{ display: block; font-family: var(--font-d); font-size: 1.35rem; font-weight: 700; color: #fff; }}
   .kpi-mini small {{ font-size: 0.72rem; color: rgba(232,228,223,0.4); letter-spacing: 0.06em; text-transform: uppercase; margin-top: 4px; display: block; }}
-  .kpi-mini.green span {{ color: var(--green); }}
-  .kpi-mini.amber span {{ color: var(--amber); }}
-  .kpi-mini.red span {{ color: var(--red); }}
+  .kpi-mini.green span {{ color: var(--green); }} .kpi-mini.amber span {{ color: var(--amber); }} .kpi-mini.red span {{ color: var(--red); }}
   .table-wrap {{ background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; margin-bottom: 16px; backdrop-filter: blur(8px); }}
   table {{ width: 100%; border-collapse: collapse; font-size: 0.875rem; }}
   thead th {{ background: rgba(192,0,0,0.18); color: rgba(232,228,223,0.6); font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; font-size: 0.72rem; padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--line); }}
@@ -275,7 +280,7 @@ def build_html_report(client, analysis_data, bills=None):
     <div class="sub">{savings_pct:.1f}% reduction vs grid-only baseline</div>
   </div>
   <div class="kpi-grid">
-    <div class="kpi green"><div class="kpi-label">Total Generated</div><div class="kpi-value">{total_gen:,.0f}</div><div class="kpi-unit">kWh</div></div>
+    <div class="kpi green"><div class="kpi-label">Total Production</div><div class="kpi-value">{total_gen:,.0f}</div><div class="kpi-unit">kWh</div></div>
     <div class="kpi amber"><div class="kpi-label">Self Consumed</div><div class="kpi-value">{self_consumed:,.0f}</div><div class="kpi-unit">kWh</div></div>
     <div class="kpi red"><div class="kpi-label">Grid Import</div><div class="kpi-value">{total_imp:,.0f}</div><div class="kpi-unit">kWh</div></div>
     <div class="kpi"><div class="kpi-label">Self-Sufficiency</div><div class="kpi-value">{self_sufficiency}</div><div class="kpi-unit">%</div></div>
