@@ -156,16 +156,17 @@ def analyse_generate(client_id):
             raw_rows = get_site_data(dash_user, dash_pass, site_name, date_from, date_to)
         except Exception as e:
             print(f'Scraper error: {e}')
+    # Dash IOT columns: Date | Consumption | Production | Grid Import | Grid Export
     totals = {'generation': 0, 'export': 0, 'import': 0, 'consumption': 0}
     formatted_rows = []
     for row in raw_rows:
         formatted_rows.append(row)
         try:
             if len(row) >= 4:
-                totals['generation']  += _parse_num(row[1])
-                totals['export']      += _parse_num(row[2])
+                totals['consumption'] += _parse_num(row[1])
+                totals['generation']  += _parse_num(row[2])
                 totals['import']      += _parse_num(row[3])
-                totals['consumption'] += _parse_num(row[4]) if len(row) > 4 else 0
+                totals['export']      += _parse_num(row[4]) if len(row) > 4 else 0
         except:
             pass
     self_consumed = totals['generation'] - totals['export']
