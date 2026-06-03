@@ -10,13 +10,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'halfway-solar-secret-2024')
 PORT = int(os.environ.get('PORT', 5050))
-
 REPORTS_DIR = os.path.join(BASE_DIR, 'reports')
 UPLOADS_DIR = os.path.join(BASE_DIR, 'uploads')
 os.makedirs(REPORTS_DIR, exist_ok=True)
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
-with app.app_context():
+with app.app_context()
     init_db()
 
 def get_setting(key, default=None):
